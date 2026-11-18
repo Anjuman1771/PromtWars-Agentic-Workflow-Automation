@@ -51,8 +51,24 @@ class Settings(BaseSettings):
     max_workflow_steps: int = Field(default=30, ge=1, le=200, description="Max allowed tasks per workflow DAG")
     max_run_time_seconds: int = Field(default=300, ge=10, le=3600, description="Max total workflow execution duration")
     default_task_timeout_seconds: int = Field(default=30, ge=1, le=300, description="Default timeout per task")
+    max_concurrent_tasks: int = Field(default=5, ge=1, le=50, description="Max concurrent tasks dispatched in parallel")
+    max_retries_per_task: int = Field(default=3, ge=0, le=10, description="Max retry attempts per task")
     max_response_size_bytes: int = Field(
         default=2 * 1024 * 1024, ge=1024, description="Max allowed response size for HTTP and tool outputs (2 MB)"
+    )
+    max_payload_size_bytes: int = Field(
+        default=1024 * 1024, ge=1024, description="Max allowed JSON payload size (1 MB)"
+    )
+
+    # Circuit Breaker Limits
+    circuit_breaker_failure_threshold: int = Field(
+        default=3, ge=1, le=50, description="Failures before circuit breaker trips to OPEN"
+    )
+    circuit_breaker_recovery_timeout_seconds: float = Field(
+        default=30.0, ge=1.0, le=600.0, description="Recovery cooldown period in seconds before testing HALF_OPEN"
+    )
+    circuit_breaker_half_open_max_trials: int = Field(
+        default=1, ge=1, le=10, description="Max trial requests allowed in HALF_OPEN"
     )
 
     # Human-in-the-Loop Settings

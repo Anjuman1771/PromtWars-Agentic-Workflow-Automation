@@ -14,6 +14,11 @@ def test_default_settings():
     assert cfg.port == 8000
     assert cfg.max_workflow_steps == 30
     assert cfg.max_run_time_seconds == 300
+    assert cfg.max_concurrent_tasks == 5
+    assert cfg.max_retries_per_task == 3
+    assert cfg.circuit_breaker_failure_threshold == 3
+    assert cfg.circuit_breaker_recovery_timeout_seconds == 30.0
+    assert cfg.circuit_breaker_half_open_max_trials == 1
     assert cfg.approval_ttl_seconds == 600
     assert cfg.is_mock_ai is True
     assert isinstance(cfg.workspace_root, Path)
