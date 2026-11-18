@@ -1,0 +1,85 @@
+"""FlowPilot AI Configuration Module.
+
+Uses Pydantic Settings for type-safe environment configuration with sensible defaults.
+"""
+
+from pathlib import Path
+from typing import List, Optional
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings with environment variable overrides."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_prefix="FLOWPILOT_",
+    )
+
+    # Application Environment
+    env: str = Field(default="development", description="Environment: development, test, production")
+    debug: bool = Field(default=False, description="Enable debug logging and stacktraces")
+    host: str = Field(default="127.0.0.1", description="API host address")
+    port: int = Field(default=8000, description="API port")
+
+    # Security & CORS
+    cors_origins: List[str] = Field(
+        default=["http://localhost:5173", "http://127.0.0.1:5173"],
+        description="Allowed CORS origins",
+    )
+    secret_key: str = Field(
+        default="flowpilot-insecure-secret-key-must-change-in-prod",
+        description="Application secret key for token signatures",
+    )
+
+    # AI Configuration (supports direct GEMINI_API_KEY from environment)
+    gemini_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias="GEMINI_API_KEY",
+        description="Google Gemini API Key. If empty, platform runs in offline mock mode.",
+    )
+    gemini_model: str = Field(
+        default="gemini-2.5-flash",
+        validation_alias="GEMINI_MODEL",
+        description="Gemini model identifier",
+    )
+
+    # Execution & Safety Limits
+    max_workflow_steps: int = Field(default=30, ge=1, le=200, description="Max allowed tasks per workflow DAG")
+    max_run_time_seconds: int = Field(default=300, ge=10, le=3600, description="Max total workflow execution duration")
+    default_task_timeout_seconds: int = Field(default=30, ge=1, le=300, description="Default timeout per task")
+    max_response_size_bytes: int = Field(
+        default=2 * 1024 * 1024, ge=1024, description="Max allowed response size for HTTP and tool outputs (2 MB)"
+    )
+
+    # Human-in-the-Loop Settings
+    approval_ttl_seconds: int = Field(
+        default=600, ge=60, le=86400, description="Approval token expiration duration in seconds (10 mins)"
+    )
+
+    # Storage Settings
+    db_path: str = Field(default="flowpilot.db", description="Path to SQLite database file")
+
+    # Workspace Path Containment
+    workspace_root: Path = Field(
+        default_factory=lambda: Path.cwd().resolve(),
+        description="Root directory boundary for file operations",
+    )
+
+    @field_validator("workspace_root", mode="after")
+    @classmethod
+    def resolve_workspace_root(cls, v: Path) -> Path:
+        """Ensure workspace root is resolved to an absolute path."""
+        return v.resolve()
+
+    @property
+    def is_mock_ai(self) -> bool:
+        """Check if platform is operating in offline mock/heuristic AI mode."""
+        return not bool(self.gemini_api_key and self.gemini_api_key.strip())
+
+
+# Global settings singleton
+settings = Settings()
