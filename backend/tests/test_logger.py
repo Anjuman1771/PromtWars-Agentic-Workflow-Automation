@@ -45,3 +45,24 @@ def test_logger_singleton_helper():
     logger = get_logger("flowpilot_test_instance")
     assert logger.name == "flowpilot_test_instance"
     assert any(isinstance(h.formatter, RedactingJSONFormatter) for h in logger.handlers)
+
+
+def test_logger_redacts_key_value_secrets_in_messages_and_exceptions():
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(RedactingJSONFormatter())
+
+    test_logger = logging.getLogger("test_exception_redaction")
+    test_logger.handlers = [handler]
+    test_logger.setLevel(logging.INFO)
+    test_logger.propagate = False
+
+    secret = "unlistedApiSecret_9x7K"
+    try:
+        raise RuntimeError(f"request failed api_key={secret}")
+    except RuntimeError:
+        test_logger.exception("operation failed")
+
+    output = stream.getvalue()
+    assert secret not in output
+    assert REDACTED_SUBSTITUTE in output

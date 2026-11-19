@@ -70,6 +70,8 @@ cp .env.example .env
 ```
 *Note: If `GEMINI_API_KEY` is not provided, FlowPilot AI operates seamlessly in offline Deterministic Mock / Heuristic Mode.*
 
+For production, set `FLOWPILOT_ENV=production` and configure `FLOWPILOT_SECRET_KEY` with a unique random secret of at least 32 characters. The development default and `.env.example` placeholder are rejected in production.
+
 ### Running Tests
 
 ```bash

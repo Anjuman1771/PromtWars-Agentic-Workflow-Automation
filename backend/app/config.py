@@ -5,7 +5,7 @@ Uses Pydantic Settings for type-safe environment configuration with sensible def
 
 from pathlib import Path
 from typing import List, Optional
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         env_prefix="FLOWPILOT_",
+        hide_input_in_errors=True,
     )
 
     # Application Environment
@@ -32,7 +33,8 @@ class Settings(BaseSettings):
     )
     secret_key: str = Field(
         default="flowpilot-insecure-secret-key-must-change-in-prod",
-        description="Application secret key for token signatures",
+        description="Development-only default; production requires a strong FLOWPILOT_SECRET_KEY.",
+        repr=False,
     )
 
     # AI Configuration (supports direct GEMINI_API_KEY from environment)
@@ -90,6 +92,33 @@ class Settings(BaseSettings):
     def resolve_workspace_root(cls, v: Path) -> Path:
         """Ensure workspace root is resolved to an absolute path."""
         return v.resolve()
+
+    @model_validator(mode="after")
+    def validate_production_secret_key(self) -> "Settings":
+        """Reject absent, weak, or known development secrets in production."""
+        if self.env.strip().lower() not in {"production", "prod"}:
+            return self
+
+        secret = self.secret_key.strip()
+        known_defaults = {
+            "flowpilot-insecure-secret-key-must-change-in-prod",
+            "change-this-in-production-to-a-secure-random-string",
+            "replace-this-with-a-secure-random-secret",
+            "secret",
+            "changeme",
+            "change-me",
+            "your-secret-key",
+            "development",
+        }
+        if (
+            len(secret) < 32
+            or secret.lower() in known_defaults
+            or len(set(secret)) < 8
+        ):
+            raise ValueError(
+                "Production requires a strong FLOWPILOT_SECRET_KEY of at least 32 characters."
+            )
+        return self
 
     @property
     def is_mock_ai(self) -> bool:

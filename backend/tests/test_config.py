@@ -1,7 +1,7 @@
 """Unit tests for FlowPilot AI Configuration."""
 
-import os
 from pathlib import Path
+import secrets
 import pytest
 from backend.app.config import Settings
 
@@ -61,3 +61,42 @@ def test_limits_validation():
 
     with pytest.raises(Exception):
         Settings(approval_ttl_seconds=10)  # Must be >= 60 seconds
+
+
+def test_development_secret_default_is_allowed():
+    cfg = Settings(
+        _env_file=None,
+        env="development",
+        secret_key="flowpilot-insecure-secret-key-must-change-in-prod",
+    )
+    assert cfg.secret_key == "flowpilot-insecure-secret-key-must-change-in-prod"
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "flowpilot-insecure-secret-key-must-change-in-prod",
+        "change-this-in-production-to-a-secure-random-string",
+        "short",
+        "x" * 64,
+    ],
+)
+def test_production_rejects_missing_or_weak_secret(secret):
+    with pytest.raises(Exception) as exc_info:
+        Settings(_env_file=None, env="production", secret_key=secret)
+    assert secret not in str(exc_info.value)
+    assert "FLOWPILOT_SECRET_KEY" in str(exc_info.value)
+
+
+def test_production_rejects_missing_secret(monkeypatch):
+    monkeypatch.delenv("FLOWPILOT_SECRET_KEY", raising=False)
+    with pytest.raises(Exception) as exc_info:
+        Settings(_env_file=None, env="production")
+    assert "FLOWPILOT_SECRET_KEY" in str(exc_info.value)
+    assert "flowpilot-insecure-secret-key-must-change-in-prod" not in str(exc_info.value)
+
+
+def test_production_accepts_strong_secret():
+    secret = secrets.token_urlsafe(32)
+    cfg = Settings(_env_file=None, env="production", secret_key=secret)
+    assert cfg.secret_key == secret

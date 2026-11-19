@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+import json
 import pytest
 import sqlite3
 
@@ -45,6 +46,65 @@ async def test_database_initialization_and_tables(temp_db):
     }
     for table in expected_tables:
         assert table in table_names, f"Table '{table}' missing from database schema."
+
+
+@pytest.mark.asyncio
+async def test_connection_pragmas_are_configured(temp_db):
+    async with temp_db.connection() as conn:
+        foreign_keys = await (await conn.execute("PRAGMA foreign_keys;")).fetchone()
+        busy_timeout = await (await conn.execute("PRAGMA busy_timeout;")).fetchone()
+        journal_mode = await (await conn.execute("PRAGMA journal_mode;")).fetchone()
+
+    assert foreign_keys[0] == 1
+    assert busy_timeout[0] == 5000
+    assert journal_mode[0].lower() == "wal"
+
+
+@pytest.mark.asyncio
+async def test_database_initialization_rejects_missing_or_invalid_schema(tmp_path):
+    database = Database(db_path=str(tmp_path / "initialization-error.db"))
+    with pytest.raises(DatabaseError, match="Schema file not found"):
+        await database.init_db(tmp_path / "missing-schema.sql")
+
+    invalid_schema = tmp_path / "invalid-schema.sql"
+    invalid_schema.write_text("THIS IS NOT VALID SQL;", encoding="utf-8")
+    with pytest.raises(DatabaseError, match="Failed to initialize schema"):
+        await database.init_db(invalid_schema)
+
+
+@pytest.mark.asyncio
+async def test_wal_initialization_error_is_not_swallowed(monkeypatch):
+    import backend.app.storage.database as database_module
+
+    class Cursor:
+        def __init__(self, value):
+            self.value = value
+
+        async def fetchone(self):
+            return (self.value,)
+
+    class FailingConnection:
+        row_factory = None
+
+        async def execute(self, query):
+            if "journal_mode = WAL" in query:
+                raise sqlite3.OperationalError("WAL initialization failed")
+            if query == "PRAGMA foreign_keys;":
+                return Cursor(1)
+            if query == "PRAGMA busy_timeout;":
+                return Cursor(5000)
+            return Cursor(None)
+
+        async def close(self):
+            return None
+
+    async def connect(_db_path):
+        return FailingConnection()
+
+    monkeypatch.setattr(database_module.aiosqlite, "connect", connect)
+    with pytest.raises(DatabaseError, match="WAL initialization failed"):
+        async with Database(db_path="flowpilot.db").connection():
+            pass
 
 
 @pytest.mark.asyncio
@@ -94,6 +154,88 @@ async def test_workflow_crud(repo):
     deleted = await repo.delete_workflow(wf_id)
     assert deleted is True
     assert await repo.get_workflow(wf_id) is None
+
+
+@pytest.mark.asyncio
+async def test_sensitive_text_is_redacted_at_persistence_boundaries(repo):
+    secret = "unlistedApiSecret_9x7K"
+    prompt = f"Summarize this report and use api_key={secret}"
+    wf = await repo.create_workflow(
+        workflow_id="wf-redaction",
+        title="Workflow title",
+        description="A safe description",
+        raw_prompt=prompt,
+        definition={"safe": "preserved", "client_secret": secret},
+    )
+    assert wf["raw_prompt"] == f"Summarize this report and use api_key={REDACTED_SUBSTITUTE}"
+    assert "Summarize this report" in wf["raw_prompt"]
+    assert wf["definition_json"] == {
+        "safe": "preserved",
+        "client_secret": REDACTED_SUBSTITUTE,
+    }
+
+    json_prompt = await repo.create_workflow(
+        workflow_id="wf-json-prompt-redaction",
+        title="JSON prompt",
+        raw_prompt='{"api_key":"private-value-123","instruction":"Keep this text"}',
+        definition={},
+    )
+    assert json.loads(json_prompt["raw_prompt"]) == {
+        "api_key": REDACTED_SUBSTITUTE,
+        "instruction": "Keep this text",
+    }
+
+    run = await repo.create_run(run_id="run-redaction", workflow_id=wf["id"])
+    task = await repo.create_task(
+        run_id=run["id"],
+        task_id="task1",
+        name="Task",
+        tool_name="transform",
+        input_params={"api_key": secret, "author": "A. Example"},
+    )
+    assert task["input_params_json"]["api_key"] == REDACTED_SUBSTITUTE
+    assert task["input_params_json"]["author"] == "A. Example"
+
+    output = await repo.update_task_output(
+        run_id=run["id"],
+        task_id="task1",
+        output_data={"result": "kept", "token": secret},
+    )
+    assert output["output_data_json"] == {
+        "result": "kept",
+        "token": REDACTED_SUBSTITUTE,
+    }
+
+    failed_task = await repo.update_task_status(
+        run_id=run["id"],
+        task_id="task1",
+        status="FAILED",
+        error_message=f"Tool failed with api_key={secret}",
+    )
+    assert secret not in failed_task["error_message"]
+    assert REDACTED_SUBSTITUTE in failed_task["error_message"]
+
+    failed_run = await repo.update_run_status(
+        run_id=run["id"],
+        status="FAILED",
+        error_message=f"Run failed with api_key={secret}",
+    )
+    assert secret not in failed_run["error_message"]
+    assert REDACTED_SUBSTITUTE in failed_run["error_message"]
+
+    audit = await repo.create_audit_log(
+        run_id=run["id"],
+        level="ERROR",
+        event_type="TOOL_FAILED",
+        message=f"Request failed with api_key={secret}",
+        metadata={"reason": f"api_key={secret}", "safe": "preserved"},
+    )
+    assert secret not in audit["message"]
+    assert REDACTED_SUBSTITUTE in audit["message"]
+    assert audit["metadata_json"] == {
+        "reason": f"api_key={REDACTED_SUBSTITUTE}",
+        "safe": "preserved",
+    }
 
 
 @pytest.mark.asyncio

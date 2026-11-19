@@ -8,13 +8,14 @@ import logging
 import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-from ..safety.redaction import redact_object, redact_text
 
 
 class RedactingJSONFormatter(logging.Formatter):
     """Custom logging formatter that outputs JSON and scrubs secrets."""
 
     def format(self, record: logging.LogRecord) -> str:
+        from ..safety.redaction import redact_object, redact_text
+
         # Standard structured log record fields
         timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
         raw_message = record.getMessage()
@@ -45,7 +46,7 @@ class RedactingJSONFormatter(logging.Formatter):
         if record.exc_info:
             log_payload["exception"] = redact_text(self.formatException(record.exc_info))
 
-        return json.dumps(log_payload)
+        return json.dumps(redact_object(log_payload))
 
 
 def get_logger(name: str = "flowpilot", level: int = logging.INFO) -> logging.Logger:

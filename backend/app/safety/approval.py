@@ -11,6 +11,7 @@ Guarantees:
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+import hmac
 import json
 import secrets
 from typing import Any, Dict, Optional
@@ -116,7 +117,8 @@ class ApprovalTokenManager:
         raw_token: str,
         action: str = "APPROVE",
         decision_by: str = "operator",
-        expected_payload: Optional[Any] = None,
+        *,
+        expected_payload: Any,
     ) -> Dict[str, Any]:
         """Verify token validity, payload binding, and atomically consume it.
 
@@ -129,6 +131,10 @@ class ApprovalTokenManager:
         action_norm = action.upper().strip()
         if action_norm not in ("APPROVE", "REJECT"):
             raise ApprovalException(f"Invalid action '{action}'. Must be 'APPROVE' or 'REJECT'.")
+        if expected_payload is None:
+            raise ApprovalTamperingException(
+                "An expected action payload is required to verify this approval."
+            )
 
         token_hash = hash_token(raw_token)
 
@@ -177,18 +183,17 @@ class ApprovalTokenManager:
             )
 
         # 4. Verify payload hash match
-        if expected_payload is not None:
-            candidate_hash = hash_payload(expected_payload)
-            if candidate_hash != record.get("payload_hash"):
-                logger.error(
-                    "Approval payload mismatch: attempted approval does not match bound action payload.",
-                    extra={"run_id": record.get("run_id"), "task_id": record.get("task_id")},
-                )
-                raise ApprovalTamperingException(
-                    "Payload mismatch: Attempted approval does not match the token's bound action payload."
-                )
+        candidate_hash = hash_payload(expected_payload)
+        if not hmac.compare_digest(candidate_hash, str(record.get("payload_hash", ""))):
+            logger.error(
+                "Approval payload mismatch: attempted approval does not match bound action payload.",
+                extra={"run_id": record.get("run_id"), "task_id": record.get("task_id")},
+            )
+            raise ApprovalTamperingException(
+                "Payload mismatch: Attempted approval does not match the token's bound action payload."
+            )
 
-        # 5. Atomic database consumption (WHERE status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP)
+        # 5. Atomic database consumption checks pending status and expiry again.
         target_status = "APPROVED" if action_norm == "APPROVE" else "REJECTED"
         consumed = await self.repository.consume_approval(
             token=token_hash,

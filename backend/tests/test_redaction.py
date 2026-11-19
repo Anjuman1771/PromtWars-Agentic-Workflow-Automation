@@ -1,5 +1,6 @@
 """Unit tests for FlowPilot AI Secret Redaction Engine."""
 
+import json
 from backend.app.safety.redaction import redact_object, redact_text, REDACTED_SUBSTITUTE
 
 
@@ -101,3 +102,14 @@ def test_non_sensitive_text_preserved():
     """Verify standard diagnostic text is untouched."""
     text = "Task 'fetch_summary' completed successfully in 240ms with 4 items."
     assert redact_text(text) == text
+
+
+def test_redaction_preserves_json_text_structure():
+    raw = '{"api_key":"private-value-123","safe":"ordinary prompt text"}'
+    sanitized = redact_text(raw)
+    parsed = json.loads(sanitized)
+
+    assert parsed == {
+        "api_key": REDACTED_SUBSTITUTE,
+        "safe": "ordinary prompt text",
+    }

@@ -33,6 +33,13 @@ from backend.app.storage.database import Database
 from backend.app.storage.repository import WorkflowRepository
 
 
+def test_safety_package_keeps_lazy_approval_exports():
+    import backend.app.safety as safety_package
+
+    assert safety_package.ApprovalTokenManager is ApprovalTokenManager
+    assert safety_package.approval_manager is not None
+
+
 # ==============================================================================
 # FIXTURES
 # ==============================================================================
@@ -315,6 +322,15 @@ async def test_token_generation_and_hashing(token_manager, safety_repo):
 
 
 @pytest.mark.asyncio
+async def test_invalid_token_is_rejected(token_manager):
+    with pytest.raises(ApprovalNotFoundException):
+        await token_manager.verify_and_consume(
+            raw_token="not-a-valid-token",
+            expected_payload={"action": "noop"},
+        )
+
+
+@pytest.mark.asyncio
 async def test_token_expiration(token_manager, safety_repo):
     """Verify expired tokens cannot be approved."""
     wf = await safety_repo.create_workflow(workflow_id="wf-exp", title="E", raw_prompt="p", definition={})
@@ -334,6 +350,7 @@ async def test_token_expiration(token_manager, safety_repo):
             raw_token=issued["raw_token"],
             action="APPROVE",
             decision_by="admin",
+            expected_payload={"op": "send"},
         )
 
 
@@ -385,12 +402,27 @@ async def test_token_reuse_prevention(token_manager, safety_repo):
     )
 
     # First consumption succeeds
-    first = await token_manager.verify_and_consume(raw_token=issued["raw_token"], action="APPROVE")
+    with pytest.raises(ApprovalTamperingException):
+        await token_manager.verify_and_consume(
+            raw_token=issued["raw_token"],
+            action="APPROVE",
+            expected_payload=None,
+        )
+
+    first = await token_manager.verify_and_consume(
+        raw_token=issued["raw_token"],
+        action="APPROVE",
+        expected_payload={"safe": True},
+    )
     assert first["status"] == "APPROVED"
 
     # Second consumption must be rejected
     with pytest.raises(ApprovalConsumedException):
-        await token_manager.verify_and_consume(raw_token=issued["raw_token"], action="APPROVE")
+        await token_manager.verify_and_consume(
+            raw_token=issued["raw_token"],
+            action="APPROVE",
+            expected_payload={"safe": True},
+        )
 
 
 @pytest.mark.asyncio
@@ -413,6 +445,7 @@ async def test_concurrent_approval_consumption(token_manager, safety_repo):
                 raw_token=issued["raw_token"],
                 action="APPROVE",
                 decision_by=f"operator_{i}",
+                expected_payload={"item": "data"},
             )
             for i in range(5)
         ),

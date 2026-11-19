@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import sqlite3
 
 from .database import Database, DatabaseError, db as default_db
-from ..safety.redaction import redact_object
+from ..safety.redaction import redact_object, redact_text
 
 
 def _ensure_json_str(val: Any) -> str:
@@ -69,7 +69,16 @@ class WorkflowRepository:
         VALUES (?, ?, ?, ?, ?);
         """
         async with self.db.connection() as conn:
-            await conn.execute(query, (workflow_id, title, description, raw_prompt, definition_json))
+            await conn.execute(
+                query,
+                (
+                    workflow_id,
+                    redact_text(title),
+                    redact_text(description) if description is not None else None,
+                    redact_text(raw_prompt),
+                    definition_json,
+                ),
+            )
             await conn.commit()
         return (await self.get_workflow(workflow_id)) or {}
 
@@ -167,7 +176,7 @@ class WorkflowRepository:
 
         if error_message is not None:
             updates.append("error_message = ?")
-            params.append(error_message)
+            params.append(redact_text(error_message))
 
         if current_step_count is not None:
             updates.append("current_step_count = ?")
@@ -266,7 +275,7 @@ class WorkflowRepository:
 
         if error_message is not None:
             updates.append("error_message = ?")
-            params.append(error_message)
+            params.append(redact_text(error_message))
 
         if retry_count is not None:
             updates.append("retry_count = ?")
@@ -354,14 +363,14 @@ class WorkflowRepository:
         if run_id:
             query = """
             SELECT * FROM approvals
-            WHERE run_id = ? AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP
+            WHERE run_id = ? AND status = 'PENDING' AND datetime(expires_at) > CURRENT_TIMESTAMP
             ORDER BY created_at ASC;
             """
             params = (run_id,)
         else:
             query = """
             SELECT * FROM approvals
-            WHERE status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP
+            WHERE status = 'PENDING' AND datetime(expires_at) > CURRENT_TIMESTAMP
             ORDER BY created_at ASC;
             """
             params = ()
@@ -384,7 +393,7 @@ class WorkflowRepository:
         query = """
         UPDATE approvals
         SET status = ?, consumed_at = CURRENT_TIMESTAMP, decision_by = ?
-        WHERE token = ? AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP;
+        WHERE token = ? AND status = 'PENDING' AND datetime(expires_at) > CURRENT_TIMESTAMP;
         """
         async with self.db.connection() as conn:
             cursor = await conn.execute(query, (status, decision_by, token))
@@ -445,7 +454,10 @@ class WorkflowRepository:
         VALUES (?, ?, ?, ?, ?, ?);
         """
         async with self.db.connection() as conn:
-            cursor = await conn.execute(query, (run_id, task_id, level, event_type, message, metadata_json))
+            cursor = await conn.execute(
+                query,
+                (run_id, task_id, level, event_type, redact_text(message), metadata_json),
+            )
             log_id = cursor.lastrowid
             await conn.commit()
 

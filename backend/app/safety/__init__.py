@@ -1,6 +1,8 @@
 """FlowPilot AI Safety and Security Package."""
 
-from .approval import ApprovalTokenManager, approval_manager, hash_payload, hash_token
+from importlib import import_module
+from typing import Any
+
 from .circuit_breaker import CircuitBreaker, CircuitBreakerState
 from .containment import validate_workspace_path
 from .exceptions import (
@@ -73,3 +75,12 @@ __all__ = [
     "DuplicateExecutionError",
     "RecoveryError",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in {"ApprovalTokenManager", "approval_manager", "hash_payload", "hash_token"}:
+        approval_module = import_module(".approval", __name__)
+        value = getattr(approval_module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

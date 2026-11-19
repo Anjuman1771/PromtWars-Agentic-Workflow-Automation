@@ -41,13 +41,21 @@ class Database:
             # Critical pragmas for data integrity and concurrency
             await conn.execute("PRAGMA foreign_keys = ON;")
             await conn.execute("PRAGMA busy_timeout = 5000;")
+            foreign_keys_cursor = await conn.execute("PRAGMA foreign_keys;")
+            if (await foreign_keys_cursor.fetchone())[0] != 1:
+                raise DatabaseError("SQLite foreign key enforcement could not be enabled.")
+            busy_timeout_cursor = await conn.execute("PRAGMA busy_timeout;")
+            if (await busy_timeout_cursor.fetchone())[0] != 5000:
+                raise DatabaseError("SQLite busy timeout could not be configured.")
 
             # WAL mode is supported for file-based databases
             if not self.db_path.startswith(":memory:"):
-                try:
-                    await conn.execute("PRAGMA journal_mode = WAL;")
-                except Exception:
-                    pass
+                wal_cursor = await conn.execute("PRAGMA journal_mode = WAL;")
+                journal_mode = (await wal_cursor.fetchone())[0]
+                if str(journal_mode).lower() != "wal":
+                    raise DatabaseError(
+                        f"SQLite WAL mode could not be enabled (reported mode: {journal_mode})."
+                    )
 
             yield conn
         except sqlite3.Error as exc:
