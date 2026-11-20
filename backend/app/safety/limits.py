@@ -32,19 +32,57 @@ class ExecutionLimits:
         max_response_size_bytes: Optional[int] = None,
         max_payload_size_bytes: Optional[int] = None,
     ):
-        self.max_workflow_steps = max_workflow_steps or settings.max_workflow_steps
-        self.max_run_time_seconds = max_run_time_seconds or settings.max_run_time_seconds
-        self.default_task_timeout_seconds = (
-            default_task_timeout_seconds or settings.default_task_timeout_seconds
+        self.max_workflow_steps = (
+            settings.max_workflow_steps
+            if max_workflow_steps is None
+            else max_workflow_steps
         )
-        self.max_concurrent_tasks = max_concurrent_tasks or settings.max_concurrent_tasks
-        self.max_retries_per_task = max_retries_per_task or settings.max_retries_per_task
+        self.max_run_time_seconds = (
+            settings.max_run_time_seconds
+            if max_run_time_seconds is None
+            else max_run_time_seconds
+        )
+        self.default_task_timeout_seconds = (
+            settings.default_task_timeout_seconds
+            if default_task_timeout_seconds is None
+            else default_task_timeout_seconds
+        )
+        self.max_concurrent_tasks = (
+            settings.max_concurrent_tasks
+            if max_concurrent_tasks is None
+            else max_concurrent_tasks
+        )
+        self.max_retries_per_task = (
+            settings.max_retries_per_task
+            if max_retries_per_task is None
+            else max_retries_per_task
+        )
         self.max_response_size_bytes = (
-            max_response_size_bytes or settings.max_response_size_bytes
+            settings.max_response_size_bytes
+            if max_response_size_bytes is None
+            else max_response_size_bytes
         )
         self.max_payload_size_bytes = (
-            max_payload_size_bytes or settings.max_payload_size_bytes
+            settings.max_payload_size_bytes
+            if max_payload_size_bytes is None
+            else max_payload_size_bytes
         )
+
+        positive_limits = {
+            "max_workflow_steps": self.max_workflow_steps,
+            "max_run_time_seconds": self.max_run_time_seconds,
+            "default_task_timeout_seconds": self.default_task_timeout_seconds,
+            "max_concurrent_tasks": self.max_concurrent_tasks,
+            "max_response_size_bytes": self.max_response_size_bytes,
+            "max_payload_size_bytes": self.max_payload_size_bytes,
+        }
+        invalid_limits = [
+            name for name, value in positive_limits.items() if value < 1
+        ]
+        if self.max_retries_per_task < 0:
+            invalid_limits.append("max_retries_per_task")
+        if invalid_limits:
+            raise ValueError("Invalid execution limit(s): " + ", ".join(invalid_limits))
 
     def validate_payload_size(self, data: Union[str, bytes, Dict[str, Any], List[Any]]) -> int:
         """Validate payload size against max_payload_size_bytes."""

@@ -1,11 +1,20 @@
 const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
+  import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, "") ||
+  "http://127.0.0.1:8000/api/v1";
 
 export type Workflow = {
   id?: string;
   name?: string | null;
   description?: string | null;
   tasks: Task[];
+};
+
+export type WorkflowRecord = {
+  id: string;
+  title?: string | null;
+  description?: string | null;
+  definition_json?: Workflow;
+  created_at?: string;
 };
 
 export type Task = {
@@ -51,6 +60,22 @@ export type Approval = {
   expires_at: string;
 };
 
+export type ExecutionResult = {
+  run_id: string;
+  state: string;
+  task_states: Record<string, string>;
+  outputs: Record<string, unknown>;
+  errors: Record<string, string>;
+  reconciliation_required: Record<string, boolean>;
+  pending_approvals: Array<{
+    approval_id: string;
+    run_id: string;
+    task_id: string;
+    tool_name: string;
+    expires_at: string;
+  }>;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -69,39 +94,54 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function resourcePath(resource: string, id: string): string {
+  return `/${resource}/${encodeURIComponent(id)}`;
+}
+
 export const api = {
   health: () => request<{ status: string }>("/health"),
-  workflows: () => request<{ items: Array<Record<string, unknown>> }>("/workflows"),
-  workflow: (id: string) => request<Record<string, unknown>>(`/workflows/${id}`),
+  workflows: () => request<{ items: WorkflowRecord[] }>("/workflows"),
+  workflow: (id: string) =>
+    request<WorkflowRecord>(resourcePath("workflows", id)),
   generate: (prompt: string) =>
     request<{ workflow: Workflow; provider: string }>("/workflows/generate", {
       method: "POST",
       body: JSON.stringify({ prompt }),
     }),
   saveWorkflow: (workflow: Workflow) =>
-    request<Record<string, unknown>>("/workflows", {
+    request<WorkflowRecord>("/workflows", {
       method: "POST",
       body: JSON.stringify(workflow),
     }),
   runWorkflow: (id: string) =>
-    request<Record<string, unknown>>(`/workflows/${id}/run`, { method: "POST" }),
+    request<ExecutionResult>(`${resourcePath("workflows", id)}/run`, {
+      method: "POST",
+    }),
   runs: () => request<{ items: RunSummary[] }>("/runs"),
-  run: (id: string) => request<RunDetail>(`/runs/${id}`),
+  run: (id: string) => request<RunDetail>(resourcePath("runs", id)),
   cancelRun: (id: string) =>
-    request<Record<string, unknown>>(`/runs/${id}/cancel`, { method: "POST" }),
+    request<ExecutionResult>(`${resourcePath("runs", id)}/cancel`, {
+      method: "POST",
+    }),
   approvals: (runId: string) =>
-    request<{ items: Approval[] }>(`/runs/${runId}/approvals`),
+    request<{ items: Approval[] }>(
+      `${resourcePath("runs", runId)}/approvals`,
+    ),
   decideApproval: (
     id: string,
     decision: "approve" | "reject",
     token: string,
     actionPayload: Record<string, unknown>,
   ) =>
-    request<Record<string, unknown>>(`/approvals/${id}/${decision}`, {
+    request<ExecutionResult>(
+      `/approvals/${encodeURIComponent(id)}/${decision}`,
+      {
       method: "POST",
       body: JSON.stringify({ token, action_payload: actionPayload }),
-    }),
-  eventsUrl: (runId: string) => `${API_BASE}/runs/${runId}/events`,
+      },
+    ),
+  eventsUrl: (runId: string) =>
+    `${API_BASE}${resourcePath("runs", runId)}/events`,
 };
 
 export { API_BASE };

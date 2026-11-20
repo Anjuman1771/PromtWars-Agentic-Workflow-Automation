@@ -60,7 +60,11 @@ class ApprovalTokenManager:
         ttl_seconds: Optional[int] = None,
     ):
         self.repository = repository or default_repository
-        self.ttl_seconds = ttl_seconds or settings.approval_ttl_seconds
+        self.ttl_seconds = (
+            settings.approval_ttl_seconds if ttl_seconds is None else ttl_seconds
+        )
+        if self.ttl_seconds <= 0:
+            raise ValueError("Approval token lifetime must be positive.")
 
     async def issue_token(
         self,

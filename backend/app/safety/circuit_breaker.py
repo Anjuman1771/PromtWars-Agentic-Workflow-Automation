@@ -40,14 +40,26 @@ class CircuitBreaker:
     ):
         self.name = name
         self.failure_threshold = (
-            failure_threshold or settings.circuit_breaker_failure_threshold
+            settings.circuit_breaker_failure_threshold
+            if failure_threshold is None
+            else failure_threshold
         )
         self.recovery_timeout = (
-            recovery_timeout or settings.circuit_breaker_recovery_timeout_seconds
+            settings.circuit_breaker_recovery_timeout_seconds
+            if recovery_timeout is None
+            else recovery_timeout
         )
         self.half_open_max_trials = (
-            half_open_max_trials or settings.circuit_breaker_half_open_max_trials
+            settings.circuit_breaker_half_open_max_trials
+            if half_open_max_trials is None
+            else half_open_max_trials
         )
+        if (
+            self.failure_threshold < 1
+            or self.recovery_timeout <= 0
+            or self.half_open_max_trials < 1
+        ):
+            raise ValueError("Circuit breaker limits must be positive.")
 
         self._state: CircuitBreakerState = CircuitBreakerState.CLOSED
         self._failure_count: int = 0

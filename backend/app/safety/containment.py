@@ -62,7 +62,10 @@ def validate_workspace_path(
     raw_str = sanitize_raw_input(str(user_path))
 
     # Resolve workspace root to its physical canonical path
-    root = Path(workspace_root or settings.workspace_root).resolve()
+    root_value = settings.workspace_root if workspace_root is None else workspace_root
+    if not str(root_value).strip():
+        raise PathTraversalViolation("Workspace root cannot be empty.")
+    root = Path(root_value).resolve()
 
     candidate = Path(raw_str)
 

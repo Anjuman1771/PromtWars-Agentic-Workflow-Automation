@@ -134,6 +134,20 @@ def test_file_operations_enforce_size_and_safe_missing_permission_errors(
         files.read(ReadFileInput(path="private.txt"))
 
 
+def test_zero_file_and_transform_limits_are_not_replaced_by_defaults(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    files = FileOperations(workspace_root=workspace, max_file_size_bytes=0)
+    with pytest.raises(ExecutionLimitExceededException):
+        files.write(WriteFileInput(path="limited.txt", content="x"))
+
+    transformer = JsonTransformer(max_input_size_bytes=0)
+    with pytest.raises(ExecutionLimitExceededException):
+        transformer.transform(
+            JsonTransformInput(operation="summarize", data="text")
+        )
+
+
 def test_json_transform_parse_select_and_filter():
     transformer = JsonTransformer()
     assert transformer.transform(

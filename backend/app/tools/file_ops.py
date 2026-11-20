@@ -53,11 +53,20 @@ class FileOperations:
         max_file_size_bytes: int | None = None,
         max_response_size_bytes: int | None = None,
     ) -> None:
-        self.workspace_root = (workspace_root or settings.workspace_root).resolve()
-        self.max_file_size_bytes = max_file_size_bytes or settings.max_file_size_bytes
-        self.max_response_size_bytes = (
-            max_response_size_bytes or settings.max_response_size_bytes
+        root = settings.workspace_root if workspace_root is None else workspace_root
+        self.workspace_root = root.resolve()
+        self.max_file_size_bytes = (
+            settings.max_file_size_bytes
+            if max_file_size_bytes is None
+            else max_file_size_bytes
         )
+        self.max_response_size_bytes = (
+            settings.max_response_size_bytes
+            if max_response_size_bytes is None
+            else max_response_size_bytes
+        )
+        if self.max_file_size_bytes < 0 or self.max_response_size_bytes < 0:
+            raise ValueError("File operation size limits must be non-negative.")
 
     def read(self, request: ReadFileInput) -> dict[str, Any]:
         """Read a bounded UTF-8 file without following workspace symlinks."""

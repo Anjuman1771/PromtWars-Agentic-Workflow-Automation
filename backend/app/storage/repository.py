@@ -6,6 +6,7 @@ Runs, Tasks, Approvals, Idempotency, and Audit Logs.
 
 from datetime import datetime, timezone
 import json
+from collections.abc import Iterable
 from typing import Any, Dict, List, Optional
 import sqlite3
 
@@ -42,6 +43,17 @@ def _parse_row(row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
             except (json.JSONDecodeError, TypeError):
                 pass
     return d
+
+
+def _parse_rows(
+    rows: Iterable[Optional[sqlite3.Row]],
+) -> List[Dict[str, Any]]:
+    parsed_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        parsed = _parse_row(row)
+        if parsed is not None:
+            parsed_rows.append(parsed)
+    return parsed_rows
 
 
 class WorkflowRepository:
@@ -96,7 +108,7 @@ class WorkflowRepository:
         async with self.db.connection() as conn:
             cursor = await conn.execute(query, (limit, offset))
             rows = await cursor.fetchall()
-            return [_parse_row(r) for r in rows if r is not None]  # type: ignore
+            return _parse_rows(rows)
 
     async def delete_workflow(self, workflow_id: str) -> bool:
         """Delete a workflow definition (cascades to all associated runs, tasks, and logs)."""
@@ -159,7 +171,7 @@ class WorkflowRepository:
         async with self.db.connection() as conn:
             cursor = await conn.execute(query, tuple(params))
             rows = await cursor.fetchall()
-            return [_parse_row(r) for r in rows if r is not None]  # type: ignore
+            return _parse_rows(rows)
 
     async def update_run_status(
         self,
@@ -371,7 +383,7 @@ class WorkflowRepository:
         async with self.db.connection() as conn:
             cursor = await conn.execute(query, (run_id,))
             rows = await cursor.fetchall()
-            return [_parse_row(r) for r in rows if r is not None]  # type: ignore
+            return _parse_rows(rows)
 
     async def update_task_status(
         self,
@@ -521,7 +533,7 @@ class WorkflowRepository:
         async with self.db.connection() as conn:
             cursor = await conn.execute(query, params)
             rows = await cursor.fetchall()
-            return [_parse_row(r) for r in rows if r is not None]  # type: ignore
+            return _parse_rows(rows)
 
     async def consume_approval(
         self,
@@ -644,7 +656,7 @@ class WorkflowRepository:
         async with self.db.connection() as conn:
             cursor = await conn.execute(query, (run_id, limit))
             rows = await cursor.fetchall()
-            return [_parse_row(r) for r in rows if r is not None]  # type: ignore
+            return _parse_rows(rows)
 
 
 # Global repository instance

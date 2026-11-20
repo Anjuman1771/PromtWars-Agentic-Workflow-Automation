@@ -84,6 +84,32 @@ def test_workflow_step_limit_validation():
     assert "exceeds configured maximum steps limit" in str(exc_info.value)
 
 
+@pytest.mark.parametrize(
+    "limit",
+    [
+        {"max_workflow_steps": 0},
+        {"max_concurrent_tasks": 0},
+        {"max_run_time_seconds": 0},
+        {"default_task_timeout_seconds": 0},
+        {"max_retries_per_task": -1},
+    ],
+)
+def test_execution_limits_reject_invalid_values_instead_of_using_defaults(limit):
+    with pytest.raises(ValueError, match="Invalid execution limit"):
+        ExecutionLimits(**limit)
+
+
+def test_zero_retry_limit_is_preserved():
+    assert ExecutionLimits(max_retries_per_task=0).max_retries_per_task == 0
+
+
+def test_safety_components_reject_zero_approval_and_breaker_limits():
+    with pytest.raises(ValueError, match="lifetime"):
+        ApprovalTokenManager(ttl_seconds=0)
+    with pytest.raises(ValueError, match="Circuit breaker limits"):
+        CircuitBreaker(failure_threshold=0)
+
+
 def test_workflow_task_retry_limit_validation():
     """Verify task retry counts above max_retries_per_task are rejected."""
     limits = ExecutionLimits(max_retries_per_task=2)
@@ -483,6 +509,11 @@ def test_valid_paths_inside_workspace(tmp_path):
     inside_abs = workspace / "nested" / "doc.pdf"
     p3 = validate_workspace_path(inside_abs, workspace_root=workspace)
     assert p3 == inside_abs.resolve()
+
+
+def test_empty_explicit_workspace_root_is_rejected():
+    with pytest.raises(PathTraversalViolation, match="root cannot be empty"):
+        validate_workspace_path("file.txt", workspace_root="")
 
 
 def test_path_traversal_rejection(tmp_path):

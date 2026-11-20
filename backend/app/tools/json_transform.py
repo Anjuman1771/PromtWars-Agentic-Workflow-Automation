@@ -76,10 +76,18 @@ class JsonTransformer:
         max_input_size_bytes: int | None = None,
         max_output_size_bytes: int | None = None,
     ) -> None:
-        self.max_input_size_bytes = max_input_size_bytes or settings.max_payload_size_bytes
-        self.max_output_size_bytes = (
-            max_output_size_bytes or settings.max_response_size_bytes
+        self.max_input_size_bytes = (
+            settings.max_payload_size_bytes
+            if max_input_size_bytes is None
+            else max_input_size_bytes
         )
+        self.max_output_size_bytes = (
+            settings.max_response_size_bytes
+            if max_output_size_bytes is None
+            else max_output_size_bytes
+        )
+        if self.max_input_size_bytes < 0 or self.max_output_size_bytes < 0:
+            raise ValueError("JSON transform size limits must be non-negative.")
 
     def transform(self, request: JsonTransformInput) -> dict[str, Any]:
         """Run one explicitly supported JSON operation."""
