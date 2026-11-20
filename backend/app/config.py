@@ -61,6 +61,18 @@ class Settings(BaseSettings):
     max_payload_size_bytes: int = Field(
         default=1024 * 1024, ge=1024, description="Max allowed JSON payload size (1 MB)"
     )
+    max_file_size_bytes: int = Field(
+        default=1024 * 1024, ge=1, description="Maximum size for an individual tool file operation"
+    )
+    tool_http_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, le=60, description="Maximum time allowed to connect to a tool HTTP destination"
+    )
+    tool_http_read_timeout_seconds: float = Field(
+        default=10.0, gt=0, le=120, description="Maximum time allowed to read a tool HTTP response"
+    )
+    tool_http_max_redirects: int = Field(
+        default=3, ge=0, le=10, description="Maximum redirects followed by the tool HTTP client"
+    )
 
     # Circuit Breaker Limits
     circuit_breaker_failure_threshold: int = Field(

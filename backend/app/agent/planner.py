@@ -26,6 +26,7 @@ from ..safety.limits import ExecutionLimits
 from .fallback import generate_fallback_workflow
 from .prompts import SYSTEM_INSTRUCTIONS, build_user_prompt, sanitize_user_prompt
 from .schemas import ALLOWED_PLANNING_TOOLS, PlanningMetadata, PlanningResult
+from ..tools.registry import ToolRegistry, default_tool_registry
 
 _REQUEST_TIMEOUT_MS = 30_000
 _FORBIDDEN_INPUT_KEYS = {
@@ -60,6 +61,7 @@ class WorkflowPlanner:
         limits: ExecutionLimits | None = None,
         client_factory: Callable[..., Any] | None = None,
         logger: logging.Logger | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self.config = config or settings
         self.limits = limits or ExecutionLimits(
@@ -72,6 +74,7 @@ class WorkflowPlanner:
         self.validator = WorkflowValidator(limits=self.limits)
         self.client_factory = client_factory or genai.Client
         self.logger = logger or get_logger("flowpilot.agent.planner")
+        self.tool_registry = tool_registry or default_tool_registry
 
     async def plan(
         self,
@@ -193,9 +196,12 @@ class WorkflowPlanner:
 
         self.validator.validate(workflow)
         for task in workflow.tasks:
-            if task.tool_name not in ALLOWED_PLANNING_TOOLS:
+            if (
+                task.tool_name not in ALLOWED_PLANNING_TOOLS
+                or not self.tool_registry.is_registered(task.tool_name)
+            ):
                 raise InvalidWorkflowSchemaError(
-                    "Generated workflow references an unsupported planning tool.",
+                    "Generated workflow references an unsupported or unauthorized tool.",
                     details={"tool_name": task.tool_name},
                 )
             retry_limit = min(

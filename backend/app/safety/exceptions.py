@@ -132,6 +132,11 @@ class ToolValidationError(ExecutionException):
     pass
 
 
+class ToolExecutionError(ExecutionException):
+    """Raised when an authorized tool cannot safely complete its operation."""
+    pass
+
+
 class DuplicateExecutionError(ExecutionException):
     """Raised when an idempotent task is executed multiple times unexpectedly."""
     pass
