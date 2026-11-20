@@ -493,6 +493,14 @@ class WorkflowRepository:
             row = await cursor.fetchone()
             return _parse_row(row)
 
+    async def get_approval_by_id(self, approval_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch an approval record by its public identifier."""
+        async with self.db.connection() as conn:
+            cursor = await conn.execute(
+                "SELECT * FROM approvals WHERE id = ?;", (approval_id,)
+            )
+            return _parse_row(await cursor.fetchone())
+
     async def list_pending_approvals(self, run_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """List active pending approvals, optionally scoped to a specific run."""
         if run_id:

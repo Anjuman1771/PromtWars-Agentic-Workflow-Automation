@@ -9,6 +9,7 @@ from backend.app.agent.fallback import (
 )
 from backend.app.agent.planner import WorkflowPlanner
 from backend.app.config import Settings
+from backend.app.tools.registry import default_tool_registry
 
 
 @pytest.mark.parametrize(
@@ -27,6 +28,8 @@ def test_offline_fallback_supports_documented_text_intents(
 
     assert workflow.tasks[0].tool_name == "transform"
     assert workflow.tasks[0].input_parameters["operation"] == expected_operation
+    assert workflow.tasks[0].input_parameters["data"]
+    assert "text" not in workflow.tasks[0].input_parameters
     assert workflow.tasks[0].outputs == [expected_output]
     assert workflow.tasks[0].requires_approval is True
 
@@ -38,6 +41,27 @@ def test_fallback_is_deterministic_for_identical_input():
     second = generate_fallback_workflow(prompt).model_dump(mode="json")
 
     assert first == second
+
+
+@pytest.mark.parametrize(
+    ("prompt", "output_key", "expected"),
+    [
+        ("Summarize: First. Second. Third. Fourth.", "summary", "First. Second. Third."),
+        ("Extract key points: Alpha. Beta.", "key_points", ["Alpha.", "Beta."]),
+    ],
+)
+def test_fallback_arguments_execute_through_registered_transform(
+    prompt,
+    output_key,
+    expected,
+):
+    task = generate_fallback_workflow(prompt).tasks[0]
+    validated = default_tool_registry.validate_inputs(
+        task.tool_name, task.input_parameters
+    )
+    result = default_tool_registry.execute_validated(task.tool_name, validated)
+
+    assert result[output_key] == expected
 
 
 def test_unsupported_offline_request_fails_clearly():

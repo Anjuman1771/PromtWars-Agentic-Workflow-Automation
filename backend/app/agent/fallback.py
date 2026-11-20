@@ -56,7 +56,7 @@ def generate_fallback_workflow(prompt: str) -> WorkflowDefinition:
                     tool_name=next(iter(ALLOWED_PLANNING_TOOLS)),
                     input_parameters={
                         "operation": operation,
-                        "text": match.group(1),
+                        "data": match.group(1),
                     },
                     outputs=[output_name],
                     requires_approval=True,

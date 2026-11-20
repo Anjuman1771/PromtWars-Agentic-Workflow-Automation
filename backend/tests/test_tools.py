@@ -157,12 +157,28 @@ def test_json_transform_parse_select_and_filter():
     ) == {"result": [{"name": "beta"}]}
 
 
+def test_json_transform_supports_bounded_offline_text_operations():
+    transformer = JsonTransformer()
+    text = "One. Two. Three. Four."
+    assert transformer.transform(
+        JsonTransformInput(operation="summarize", data=text)
+    ) == {"result": "One. Two. Three.", "summary": "One. Two. Three."}
+    assert transformer.transform(
+        JsonTransformInput(operation="extract_key_points", data=text)
+    ) == {
+        "result": ["One.", "Two.", "Three.", "Four."],
+        "key_points": ["One.", "Two.", "Three.", "Four."],
+    }
+
+
 def test_json_transform_rejects_invalid_json_paths_operations_and_sizes():
     transformer = JsonTransformer(max_input_size_bytes=32, max_output_size_bytes=32)
     with pytest.raises(ToolExecutionError, match="not valid JSON"):
         transformer.transform(JsonTransformInput(operation="parse", data="{"))
     with pytest.raises(ValidationError):
         JsonTransformInput(operation="execute", data={})
+    with pytest.raises(ValidationError):
+        JsonTransformInput(operation="summarize", data="")
     with pytest.raises(ValidationError):
         JsonTransformInput(operation="select", data={}, path="$..secret")
     with pytest.raises(ToolExecutionError, match="does not exist"):

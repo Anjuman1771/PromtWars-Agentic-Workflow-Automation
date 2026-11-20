@@ -24,7 +24,9 @@ class JsonTransformInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    operation: Literal["parse", "select", "filter"]
+    operation: Literal[
+        "parse", "select", "filter", "summarize", "extract_key_points"
+    ]
     data: Any
     path: StrictStr | None = Field(
         default=None,
@@ -51,6 +53,11 @@ class JsonTransformInput(BaseModel):
                 raise ValueError("select requires path")
             if {"field", "operator", "value"} & self.model_fields_set:
                 raise ValueError("select does not accept filter fields")
+        elif self.operation in {"summarize", "extract_key_points"}:
+            if not isinstance(self.data, str) or not self.data.strip():
+                raise ValueError(f"{self.operation} requires non-empty text in data")
+            if {"path", "field", "operator", "value"} & self.model_fields_set:
+                raise ValueError(f"{self.operation} does not accept path or filter fields")
         elif self.operation == "filter":
             if self.field is None or self.operator is None:
                 raise ValueError("filter requires field and operator")
@@ -88,7 +95,7 @@ class JsonTransformer:
                 raise ToolExecutionError("The supplied text is not valid JSON.") from None
         elif request.operation == "select":
             result = self._select(data, request.path or "$")
-        else:
+        elif request.operation == "filter":
             target = self._select(data, request.path or "$")
             if not isinstance(target, list):
                 raise ToolExecutionError("The filter target must be a JSON array.")
@@ -101,10 +108,26 @@ class JsonTransformer:
                 if self._matches(actual, request.operator or "equals", request.value):
                     filtered.append(item)
             result = filtered
+        elif request.operation == "summarize":
+            result = " ".join(self._sentences(data)[:3])
+        else:
+            result = self._sentences(data)[:5]
 
         response = {"result": result}
+        if request.operation == "summarize":
+            response["summary"] = result
+        elif request.operation == "extract_key_points":
+            response["key_points"] = result
         self._check_size(response, self.max_output_size_bytes, "output")
         return response
+
+    @staticmethod
+    def _sentences(text: str) -> list[str]:
+        return [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+|\r?\n+", text)
+            if sentence.strip()
+        ]
 
     @staticmethod
     def _select(data: Any, path: str) -> Any:
