@@ -1,7 +1,7 @@
 # FlowPilot AI: Intelligent Agentic Workflow Automation Platform
 
 > **Challenge:** PS01 - Agentic Workflow Automation  
-> **Status:** Phase 1 Complete (Project Setup, Configuration, Observability & Secret Redaction)
+> **Status:** Phase 4 Complete (Workflow Models, DAG Validation, Planning & Safe Interpolation)
 
 FlowPilot AI is an agentic workflow automation platform engineered for reliability, safety, and operational transparency. It translates natural language objectives into Directed Acyclic Graphs (DAGs) and executes tasks with strict validation, human-in-the-loop (HITL) approval gates, and zero-trust security guardrails.
 
@@ -33,7 +33,7 @@ PromtWars-Agentic-Workflow-Automation/
 │   │   ├── config.py           # Pydantic Settings configuration
 │   │   ├── observability/      # Structured JSON logging & secret redaction
 │   │   ├── safety/             # Security guards, limits, circuit breaker, HITL
-│   │   ├── core/               # DAG engine, models, idempotency, recovery
+│   │   ├── core/               # Typed DAG models, validation, planning & interpolation
 │   │   ├── agent/              # Gemini integration & heuristic mock planner
 │   │   ├── tools/              # Safe tools (HTTP, file ops, search, data)
 │   │   ├── storage/            # SQLite schema and repositories
