@@ -35,10 +35,14 @@ CREATE TABLE IF NOT EXISTS tasks (
     task_id TEXT NOT NULL,        -- Graph node identifier (e.g. "fetch_data")
     name TEXT NOT NULL,
     tool_name TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('PENDING', 'RUNNING', 'PAUSED_APPROVAL', 'COMPLETED', 'FAILED', 'SKIPPED')),
+    status TEXT NOT NULL CHECK(status IN ('PENDING', 'RUNNING', 'PAUSED_APPROVAL', 'COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED')),
     requires_approval BOOLEAN DEFAULT 0,
     depends_on_json TEXT NOT NULL, -- JSON Array of prerequisite task_ids
     input_params_json TEXT NOT NULL,
+    idempotency_key TEXT,
+    input_redacted BOOLEAN DEFAULT 0,
+    output_redacted BOOLEAN DEFAULT 0,
+    reconciliation_required BOOLEAN NOT NULL DEFAULT 0,
     output_data_json TEXT,
     error_message TEXT,
     retry_count INTEGER DEFAULT 0,
@@ -70,6 +74,7 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
     task_id TEXT NOT NULL,
     tool_name TEXT NOT NULL,
     output_json TEXT NOT NULL,
+    output_redacted BOOLEAN DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
 );

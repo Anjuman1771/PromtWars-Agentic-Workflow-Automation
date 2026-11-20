@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     default_task_timeout_seconds: int = Field(default=30, ge=1, le=300, description="Default timeout per task")
     max_concurrent_tasks: int = Field(default=5, ge=1, le=50, description="Max concurrent tasks dispatched in parallel")
     max_retries_per_task: int = Field(default=3, ge=0, le=10, description="Max retry attempts per task")
+    retry_base_delay_seconds: float = Field(
+        default=0.25, gt=0, le=30, description="Base delay for bounded exponential task retries"
+    )
+    retry_max_delay_seconds: float = Field(
+        default=5.0, gt=0, le=120, description="Maximum delay between task retries"
+    )
     max_response_size_bytes: int = Field(
         default=2 * 1024 * 1024, ge=1024, description="Max allowed response size for HTTP and tool outputs (2 MB)"
     )

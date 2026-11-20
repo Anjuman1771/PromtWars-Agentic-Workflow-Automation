@@ -199,6 +199,19 @@ class WorkflowRepository:
                 return None
         return await self.get_run(run_id)
 
+    async def claim_run(self, run_id: str) -> bool:
+        """Atomically acquire a run that is pending or waiting for approval."""
+        async with self.db.connection() as conn:
+            cursor = await conn.execute(
+                """
+                UPDATE runs SET status = 'RUNNING'
+                WHERE id = ? AND status IN ('PENDING', 'PAUSED_APPROVAL');
+                """,
+                (run_id,),
+            )
+            await conn.commit()
+            return cursor.rowcount == 1
+
     # --------------------------------------------------------------------------
     # TASKS
     # --------------------------------------------------------------------------
@@ -213,6 +226,9 @@ class WorkflowRepository:
         requires_approval: bool = False,
         depends_on: Optional[List[str]] = None,
         input_params: Any = None,
+        idempotency_key: Optional[str] = None,
+        input_redacted: bool = False,
+        reconciliation_required: bool = False,
     ) -> Dict[str, Any]:
         """Create a task instance within a run."""
         full_id = f"{run_id}:{task_id}"
@@ -222,8 +238,9 @@ class WorkflowRepository:
         query = """
         INSERT INTO tasks (
             id, run_id, task_id, name, tool_name, status,
-            requires_approval, depends_on_json, input_params_json, retry_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+            requires_approval, depends_on_json, input_params_json,
+            idempotency_key, input_redacted, reconciliation_required, retry_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
         """
         async with self.db.connection() as conn:
             await conn.execute(
@@ -238,10 +255,107 @@ class WorkflowRepository:
                     1 if requires_approval else 0,
                     depends_on_json,
                     input_params_json,
+                    idempotency_key,
+                    1 if input_redacted else 0,
+                    1 if reconciliation_required else 0,
                 ),
             )
             await conn.commit()
         return (await self.get_task(run_id, task_id)) or {}
+
+    async def set_task_idempotency_key(
+        self,
+        run_id: str,
+        task_id: str,
+        idempotency_key: str,
+    ) -> bool:
+        """Persist the input fingerprint before a tool can be invoked."""
+        async with self.db.connection() as conn:
+            cursor = await conn.execute(
+                """
+                UPDATE tasks SET idempotency_key = ?
+                WHERE run_id = ? AND task_id = ?
+                  AND status IN ('PENDING', 'PAUSED_APPROVAL')
+                  AND reconciliation_required = 0
+                  AND (idempotency_key IS NULL OR idempotency_key = ?);
+                """,
+                (idempotency_key, run_id, task_id, idempotency_key),
+            )
+            await conn.commit()
+            return cursor.rowcount == 1
+
+    async def claim_task(
+        self,
+        run_id: str,
+        task_id: str,
+        idempotency_key: str,
+    ) -> bool:
+        """Atomically claim a pending task and persist its execution fingerprint."""
+        async with self.db.connection() as conn:
+            await conn.execute("BEGIN IMMEDIATE;")
+            cursor = await conn.execute(
+                """
+                UPDATE tasks
+                SET status = 'RUNNING',
+                    idempotency_key = ?,
+                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+                WHERE run_id = ? AND task_id = ? AND status = 'PENDING'
+                  AND reconciliation_required = 0
+                  AND (idempotency_key IS NULL OR idempotency_key = ?);
+                """,
+                (idempotency_key, run_id, task_id, idempotency_key),
+            )
+            if cursor.rowcount == 1:
+                await conn.execute(
+                    """
+                    UPDATE runs SET current_step_count = current_step_count + 1
+                    WHERE id = ?;
+                    """,
+                    (run_id,),
+                )
+            await conn.commit()
+            return cursor.rowcount == 1
+
+    async def transition_task_status(
+        self,
+        run_id: str,
+        task_id: str,
+        expected_statuses: tuple[str, ...],
+        status: str,
+        *,
+        error_message: Optional[str] = None,
+        retry_count: Optional[int] = None,
+        completed: bool = False,
+        reconciliation_required: Optional[bool] = None,
+    ) -> bool:
+        """Change task state only if its current state matches an expected state."""
+        if not expected_statuses:
+            return False
+        updates = ["status = ?"]
+        params: list[Any] = [status]
+        if error_message is not None:
+            updates.append("error_message = ?")
+            params.append(redact_text(error_message))
+        if retry_count is not None:
+            updates.append("retry_count = ?")
+            params.append(retry_count)
+        if reconciliation_required is not None:
+            updates.append("reconciliation_required = ?")
+            params.append(1 if reconciliation_required else 0)
+        if completed:
+            updates.append("completed_at = CURRENT_TIMESTAMP")
+        placeholders = ", ".join("?" for _ in expected_statuses)
+        params.extend([run_id, task_id, *expected_statuses])
+        async with self.db.connection() as conn:
+            cursor = await conn.execute(
+                f"""
+                UPDATE tasks SET {", ".join(updates)}
+                WHERE run_id = ? AND task_id = ? AND status IN ({placeholders});
+                """,
+                tuple(params),
+            )
+            await conn.commit()
+            return cursor.rowcount == 1
 
     async def get_task(self, run_id: str, task_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a specific task in a run."""
@@ -303,16 +417,37 @@ class WorkflowRepository:
         task_id: str,
         output_data: Any,
         status: str = "COMPLETED",
+        output_redacted: Optional[bool] = None,
+        reconciliation_required: bool = False,
+        expected_statuses: tuple[str, ...] = ("PENDING", "RUNNING"),
     ) -> Optional[Dict[str, Any]]:
         """Set task output payload and complete the task."""
+        if not expected_statuses:
+            return None
         output_data_json = _ensure_json_str(output_data)
+        redacted_update = (
+            "" if output_redacted is None else ", output_redacted = ?"
+        )
+        reconciliation_update = ", reconciliation_required = ?"
+        params: list[Any] = [output_data_json, status]
+        if output_redacted is not None:
+            params.append(1 if output_redacted else 0)
+        params.append(1 if reconciliation_required else 0)
+        placeholders = ", ".join("?" for _ in expected_statuses)
+        params.extend([run_id, task_id])
         query = """
         UPDATE tasks
         SET output_data_json = ?, status = ?, completed_at = CURRENT_TIMESTAMP
-        WHERE run_id = ? AND task_id = ?;
-        """
+            {redacted_update}{reconciliation_update}
+        WHERE run_id = ? AND task_id = ? AND status IN ({placeholders});
+        """.format(
+            redacted_update=redacted_update,
+            reconciliation_update=reconciliation_update,
+            placeholders=placeholders,
+        )
+        params.extend(expected_statuses)
         async with self.db.connection() as conn:
-            cursor = await conn.execute(query, (output_data_json, status, run_id, task_id))
+            cursor = await conn.execute(query, tuple(params))
             await conn.commit()
             if cursor.rowcount == 0:
                 return None
@@ -402,6 +537,25 @@ class WorkflowRepository:
                 return None
         return await self.get_approval(token)
 
+    async def get_latest_approval_for_task(
+        self,
+        run_id: str,
+        task_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch the newest approval record, including expired and consumed records."""
+        async with self.db.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE run_id = ? AND task_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1;
+                """,
+                (run_id, task_id),
+            )
+            row = await cursor.fetchone()
+            return _parse_row(row)
+
     # --------------------------------------------------------------------------
     # IDEMPOTENCY
     # --------------------------------------------------------------------------
@@ -421,16 +575,27 @@ class WorkflowRepository:
         task_id: str,
         tool_name: str,
         output_data: Any,
+        output_redacted: bool = False,
     ) -> Dict[str, Any]:
         """Store output of completed task for idempotency caching."""
         output_json = _ensure_json_str(output_data)
         query = """
-        INSERT OR REPLACE INTO idempotency_records (
-            idempotency_key, run_id, task_id, tool_name, output_json
-        ) VALUES (?, ?, ?, ?, ?);
+        INSERT OR IGNORE INTO idempotency_records (
+            idempotency_key, run_id, task_id, tool_name, output_json, output_redacted
+        ) VALUES (?, ?, ?, ?, ?, ?);
         """
         async with self.db.connection() as conn:
-            await conn.execute(query, (idempotency_key, run_id, task_id, tool_name, output_json))
+            await conn.execute(
+                query,
+                (
+                    idempotency_key,
+                    run_id,
+                    task_id,
+                    tool_name,
+                    output_json,
+                    1 if output_redacted else 0,
+                ),
+            )
             await conn.commit()
         return (await self.get_cached_result(idempotency_key)) or {}
 

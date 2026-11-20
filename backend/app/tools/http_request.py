@@ -17,6 +17,7 @@ from ..safety.exceptions import (
     ExecutionLimitExceededException,
     SSRFSecurityViolation,
     ToolExecutionError,
+    TransientToolExecutionError,
 )
 
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -232,9 +233,11 @@ class HttpRequestTool:
                     max_response_bytes=self.max_response_size_bytes,
                 )
             except (TimeoutError, socket.timeout):
-                raise ToolExecutionError("The HTTP request timed out.") from None
+                raise TransientToolExecutionError("The HTTP request timed out.") from None
             except (OSError, http.client.HTTPException, ssl.SSLError, ValueError):
-                raise ToolExecutionError("The HTTP request could not be completed.") from None
+                raise TransientToolExecutionError(
+                    "The HTTP request could not be completed."
+                ) from None
 
             if len(response.body) > self.max_response_size_bytes:
                 raise ExecutionLimitExceededException(

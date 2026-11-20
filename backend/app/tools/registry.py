@@ -30,6 +30,7 @@ class ToolRegistration(Generic[InputT]):
 
     input_model: type[InputT]
     handler: ToolHandler[InputT]
+    retry_safe: bool | Callable[[InputT], bool] = False
 
 
 class ToolRegistry:
@@ -43,6 +44,8 @@ class ToolRegistry:
         identifier: str,
         input_model: type[InputT],
         handler: ToolHandler[InputT],
+        *,
+        retry_safe: bool | Callable[[InputT], bool] = False,
     ) -> None:
         """Register a unique, explicitly named schema and handler."""
         if not _TOOL_IDENTIFIER.fullmatch(identifier):
@@ -52,6 +55,7 @@ class ToolRegistry:
         self._tools[identifier] = ToolRegistration(
             input_model=input_model,
             handler=handler,
+            retry_safe=retry_safe,
         )
 
     def is_registered(self, identifier: str) -> bool:
@@ -78,8 +82,8 @@ class ToolRegistry:
                     details={"tool_name": task.tool_name},
                 )
 
-    def execute(self, identifier: str, inputs: dict[str, Any]) -> Any:
-        """Validate inputs against the registered schema before invoking a tool."""
+    def validate_inputs(self, identifier: str, inputs: dict[str, Any]) -> BaseModel:
+        """Validate inputs for an authorized tool without invoking its handler."""
         registration = self._tools.get(identifier)
         if registration is None:
             raise ToolNotFoundError(
@@ -97,7 +101,37 @@ class ToolRegistry:
                 "Tool inputs do not match the registered schema.",
                 details={"validation_errors": errors_found},
             ) from None
-        return registration.handler(validated)
+        return validated
+
+    def is_retry_safe(self, identifier: str, validated_inputs: BaseModel) -> bool:
+        """Return whether a registered tool explicitly permits transient retries."""
+        registration = self._tools.get(identifier)
+        if registration is None:
+            raise ToolNotFoundError(
+                "The requested tool is not authorized.",
+                details={"tool_name": identifier},
+            )
+        if not isinstance(validated_inputs, registration.input_model):
+            raise ToolValidationError("Validated inputs do not match the registered tool schema.")
+        if callable(registration.retry_safe):
+            return registration.retry_safe(validated_inputs)
+        return registration.retry_safe
+
+    def execute_validated(self, identifier: str, validated_inputs: BaseModel) -> Any:
+        """Invoke a registered tool with an instance of its declared input schema."""
+        registration = self._tools.get(identifier)
+        if registration is None:
+            raise ToolNotFoundError(
+                "The requested tool is not authorized.",
+                details={"tool_name": identifier},
+            )
+        if not isinstance(validated_inputs, registration.input_model):
+            raise ToolValidationError("Validated inputs do not match the registered tool schema.")
+        return registration.handler(validated_inputs)
+
+    def execute(self, identifier: str, inputs: dict[str, Any]) -> Any:
+        """Validate inputs against the registered schema before invoking a tool."""
+        return self.execute_validated(identifier, self.validate_inputs(identifier, inputs))
 
 
 def create_default_tool_registry(
@@ -126,12 +160,21 @@ def create_default_tool_registry(
         max_response_size_bytes=app_config.max_response_size_bytes,
     )
     registry = ToolRegistry()
-    registry.register("file.read", ReadFileInput, files.read)
+    registry.register("file.read", ReadFileInput, files.read, retry_safe=True)
     registry.register("file.write", WriteFileInput, files.write)
-    registry.register("file.list", ListFilesInput, files.list_files)
-    registry.register("http.request", HttpRequestInput, http_tool.request)
-    registry.register("transform", JsonTransformInput, transformer.transform)
-    registry.register("search.query", SearchInput, search_tool.search)
+    registry.register("file.list", ListFilesInput, files.list_files, retry_safe=True)
+    registry.register(
+        "http.request",
+        HttpRequestInput,
+        http_tool.request,
+        retry_safe=lambda request: request.method in {"GET", "HEAD"},
+    )
+    registry.register(
+        "transform", JsonTransformInput, transformer.transform, retry_safe=True
+    )
+    registry.register(
+        "search.query", SearchInput, search_tool.search, retry_safe=True
+    )
     return registry
 
 

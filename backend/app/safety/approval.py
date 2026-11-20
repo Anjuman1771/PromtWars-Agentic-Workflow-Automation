@@ -71,8 +71,8 @@ class ApprovalTokenManager:
     ) -> Dict[str, Any]:
         """Issue a cryptographically secure approval token.
 
-        Stores only the SHA-256 hash in the database, while returning the raw token
-        to the client once.
+        Stores the token and payload hashes, not the raw token or action payload.
+        The raw token is returned to the caller once.
         """
         raw_token = f"fp_tok_{secrets.token_urlsafe(32)}"
         token_hash = hash_token(raw_token)
@@ -89,7 +89,7 @@ class ApprovalTokenManager:
             run_id=run_id,
             task_id=task_id,
             payload_hash=payload_hash,
-            action_payload=action_payload,
+            action_payload={},
             expires_at=expires_at,
         )
 

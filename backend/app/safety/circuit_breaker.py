@@ -134,8 +134,13 @@ class CircuitBreaker:
             self._state = CircuitBreakerState.OPEN
             self._trial_count = 0
             logger.warning(
-                f"Circuit breaker '{self.name}' trial probe failed ({exc}). Returned to OPEN state.",
-                extra={"data": {"name": self.name, "error": str(exc)}},
+                f"Circuit breaker '{self.name}' trial probe failed. Returned to OPEN state.",
+                extra={
+                    "data": {
+                        "name": self.name,
+                        "error_type": type(exc).__name__,
+                    }
+                },
             )
         elif self._state == CircuitBreakerState.CLOSED:
             self._failure_count += 1

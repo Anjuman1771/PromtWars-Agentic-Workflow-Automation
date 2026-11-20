@@ -137,6 +137,11 @@ class ToolExecutionError(ExecutionException):
     pass
 
 
+class TransientToolExecutionError(ToolExecutionError):
+    """Raised only when a tool operation failed for a potentially transient reason."""
+    pass
+
+
 class DuplicateExecutionError(ExecutionException):
     """Raised when an idempotent task is executed multiple times unexpectedly."""
     pass
